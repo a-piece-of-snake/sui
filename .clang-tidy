@@ -1,0 +1,27 @@
+---
+Checks: >
+  bugprone-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  readability-identifier-naming,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-magic-numbers,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -bugprone-easily-swappable-parameters,
+  -readability-identifier-length
+
+WarningsAsErrors: 'bugprone-*,cppcoreguidelines-owning-memory'
+
+CheckOptions:
+  - key:             cppcoreguidelines-explicit-virtual-functions.IgnoreDestructors
+    value:           'true'
+  - key:             readability-identifier-naming.MemberPrefix
+    value:           m_
+
+
+  
+  - key:             readability-identifier-naming.GlobalVariablePrefix
+    value:           g_
