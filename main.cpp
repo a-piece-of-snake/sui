@@ -2,52 +2,73 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
-#include <iostream>
 
 auto main(int argc, char* argv[]) -> int {
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
-        return -1;
-    }
-    if (!TTF_Init()) {
-        return -1;
-    }
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS);
+    TTF_Init();
 
-    SDL_Window* window = SDL_CreateWindow("Test CppProject", 800, 600, SDL_WINDOW_RESIZABLE);
+    SDL_Window* window = SDL_CreateWindow("CppProject", 1000, 700, SDL_WINDOW_RESIZABLE);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
-
     TTF_Font* mainFont = TTF_OpenFont("Assets/Fonts/NanoDyongSong.ttf", 24);
-    if (mainFont == nullptr) {
-        std::cerr << "Font not found!" << '\n';
-    }
 
     UI gui(renderer);
 
     auto& rootBox = gui.AddElement<Box>(0xFFFFFFFF, [&](Box& b) -> void {
-        b.setBgColor({30, 30, 35, 255}).setWeights({1.F, 1.F, 1.F}, {1.F, 1.F, 1.F});
+        b.setBgColor({20, 20, 25, 255})
+            .setDims({{SizeUnit::Weight, 1.F}},
+                     {{SizeUnit::Pixel, 250.F}, {SizeUnit::Weight, 1.F}});
     });
 
-    auto& button = gui.AddElement<Box>(&rootBox, [&](Box& b) -> void {
-        b.setGridPos(1, 1, 2, 2)
-            .setBgColor({70, 130, 180, 255})
-            .setRadius(15.F)
-            .setMargin(20, 20, 40, 40)
-            .setShadow({0, 0, 0, 100}, 10.F, 5.F, 5.F);
+    auto& sidebar = gui.AddElement<Box>(&rootBox, [&](Box& b) -> void {
+        b.setGridPos(0, 0, 1, 1).setBgColor({35, 35, 40, 255}).setPadding(20, 20, 20, 20);
+    });
 
-        b.hasMouseEvents = true;
+    auto& rightBox = gui.AddElement<Box>(&rootBox, [&](Box& b) -> void {
+        b.setGridPos(0, 1, 1, 2)
+            .setBgColor({30, 30, 35, 255})
+            .setDims({{SizeUnit::Weight, 1.F}, {SizeUnit::Weight, 1.F}}, {{SizeUnit::Weight, 1.F}});
+    });
+
+    auto& topSection = gui.AddElement<Box>(&rightBox, [&](Box& b) -> void {
+        b.setGridPos(0, 0, 1, 1)
+            .setDims({{SizeUnit::Weight, 1.F}},
+                     {{SizeUnit::Weight, 1.F}, {SizeUnit::Weight, 1.F}, {SizeUnit::Weight, 1.F}})
+            .setGaps(10.F, 10.F);
+    });
+
+    for (int i = 0; i < 3; ++i) {
+        gui.AddElement<Box>(&topSection, [i](Box& b) -> void {
+            b.setGridPos(0, i, 1, i + 1)
+                .setBgColor({50, 50, 60, 255})
+                .setMargin(10, 10, 10, 10)
+                .setRadius(10.F);
+        });
+    }
+    auto& bottomSection = gui.AddElement<Box>(&rightBox, [&](Box& b) -> void {
+        b.setGridPos(1, 0, 2, 1).setDims({{SizeUnit::Weight, 1.F}}, {{SizeUnit::Weight, 1.F}});
+    });
+    auto& button = gui.AddElement<Box>(&bottomSection, [&](Box& b) -> void {
+        b.setGridPos(0, 0, 1, 1)
+            .setBgColor({70, 130, 180, 255})
+            .setRadius(12.F)
+            .setPadding(10, 10, 10, 10)
+            .setMargin(100, 100, 200, 200)
+            .setShadow({0, 0, 0, 150}, 15.F, 8.F, 8.F)
+            .setBorder({255, 255, 255, 200}, 2.F);
+
         b.onHoverIn = [](int x, int y) -> void { std::cout << "Hover In!" << '\n'; };
         b.onHoverOut = [](int x, int y) -> void { std::cout << "Hover Out!" << '\n'; };
         b.onMouseDown = [](int x, int y) -> void { std::cout << "Buttom Down!" << '\n'; };
         b.onMouseUp = [](int x, int y) -> void { std::cout << "Button Up!" << '\n'; };
+        b.hasMouseEvents = true;
     });
 
-    gui.AddElement<Text>(&button, [&](Text& t) -> void {
+    auto& buttonText = gui.AddElement<Text>(&button, [&](Text& t) -> void {
         t.setGridPos(0, 0, 1, 1)
-            .setStyle({255, 255, 255, 255}, true, TTF_STYLE_UNDERLINE, mainFont, 24.F, true)
-            .setText("TESTETSETSDSDVSD VA EFD!")
+            .setStyle({255, 255, 255, 255}, true, 0, mainFont, 28.F, true)
+            .setText("TEST")
             .setAlignment(Alignment::MiddleMiddle);
     });
-
-    gui.calculate();
 
     bool running = true;
     while (running) {
@@ -70,22 +91,17 @@ auto main(int argc, char* argv[]) -> int {
         int h = 0;
         SDL_GetWindowSize(window, &w, &h);
 
+        gui.calculate();
         gui.renderInteractionTexture(w, h);
         gui.handleInteractions(static_cast<int>(mx), static_cast<int>(my), states);
 
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
-
         gui.render(w, h);
-
         SDL_RenderPresent(renderer);
     }
 
-    if (mainFont != nullptr) {
-        TTF_CloseFont(mainFont);
-    }
-    TTF_Quit();
+    TTF_CloseFont(mainFont);
     SDL_Quit();
-
     return 0;
 }

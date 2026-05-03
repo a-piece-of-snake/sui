@@ -7,6 +7,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 #include <algorithm>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <ranges>
 #include <utility>
@@ -19,10 +20,6 @@ inline auto IDToColor(uint32_t ID) -> SDL_Color {
 inline auto colorToID(SDL_Color c) -> uint32_t {
     return c.r + (c.g << 8) + (c.b << 16) + (c.a << 24);
 }
-
-struct Gaps {
-    float top, bottom, left, right;
-};
 enum class Alignment {
     TopLeft,
     TopMiddle,
@@ -32,14 +29,39 @@ enum class Alignment {
     MiddleRight,
     BottomLeft,
     BottomMiddle,
-    BottomRight,
-    Float
+    BottomRight
 };
 struct GridPos {
     int rowStart = 0; // 起始行
     int colStart = 0; // 起始列
     int rowEnd = 1;   // 结束行
     int colEnd = 1;   // 结束列
+};
+enum class SizeUnit {
+    Pixel, // 按照像素的固定大小
+    Weight // 按照父元素的比例大小
+};
+
+struct Dimension {
+    SizeUnit unit = SizeUnit::Weight;
+    float value = 1.F;
+    [[nodiscard]] auto get(const float weightUnit) const -> float {
+        switch (unit) {
+        case SizeUnit::Pixel: {
+            return value;
+        }
+        case SizeUnit::Weight: {
+            return weightUnit * value;
+        }
+        default: {
+            return 0.F;
+        }
+        }
+    }
+};
+
+struct Gaps {
+    float top = 0.F, bottom = 0.F, left = 0.F, right = 0.F;
 };
 class UI;
 class Element {
@@ -60,31 +82,26 @@ public:
     virtual ~Element() = default;
 
     GridPos gridPos{}; // 应该与父元素网格对应
-    // 只有对齐方法为float才设置
-    float floatX = 0.F; // float情况下的绝对X坐标
-    float floatY = 0.F; // float情况下的绝对Y坐标
-    float floatW = 0.F; // float情况下的绝对宽度
-    float floatH = 0.F; // float情况下的绝对高度
     // 不影响布局只影响渲染
-    float offsetX = 0.F;
-    float offsetY = 0.F;
+    Dimension offsetX = {.unit = SizeUnit::Pixel, .value = 0.F};
+    Dimension offsetY = {.unit = SizeUnit::Pixel, .value = 0.F};
     std::vector<Element*> children; // 子节点
-    Element* parent;                // 父节点
-    uint32_t ID;                    // DO NOT SET IT!!  由ui设置
+    Element* parent{};              // 父节点
+    uint32_t ID{};                  // DO NOT SET IT!!  由ui设置
     UI* uiContext = nullptr;        // DO NOT SET IT!!  从ui创建时会自动设置
     unsigned int hoverTime = 0;
     unsigned int clickTime = 0;
-    std::array<bool, 6> mouseState; // DO NOt SET IT!! 左键 中间 右键 侧键1 侧键2 是否悬停
-    bool isDirty = true;            // 是否更改
+    std::array<bool, 6> mouseState{}; // DO NOt SET IT!! 左键 中间 右键 侧键1 侧键2 是否悬停
+    bool isDirty = true;              // 是否更改
     // 相对于父亲的坐标
     float cacheX = 0.F;
     float cacheY = 0.F;
     float cacheW = 0.F;
     float cacheH = 0.F;
 
-    // 例如{1,2,1 }中间格子为两边格子的两倍大小
-    std::vector<float> rowWeights = {1.F};
-    std::vector<float> colWeights = {1.F};
+    // 例如{1,2,1}中间格子为两边格子的两倍大小
+    std::vector<Dimension> rowDims = {{.unit = SizeUnit::Weight, .value = 1.F}};
+    std::vector<Dimension> colDims = {{.unit = SizeUnit::Weight, .value = 1.F}};
     // 格子之间的缝隙
     float rowGap = 0.F;
     float colGap = 0.F;
@@ -115,16 +132,10 @@ public:
     }
 
     template <typename Self>
-    auto setWeights(this Self&& self, std::vector<float> rows, std::vector<float> cols) -> auto& {
-        self.rowWeights = std::move(rows);
-        self.colWeights = std::move(cols);
-        self.isDirty = true;
-        return self;
-    }
-
-    template <typename Self>
-    auto setAlignment(this Self&& self, Alignment align) -> auto& {
-        self.alignment = align;
+    auto setDims(this Self&& self, std::vector<Dimension> rows, std::vector<Dimension> cols)
+        -> auto& {
+        self.rowDims = std::move(rows);
+        self.colDims = std::move(cols);
         self.isDirty = true;
         return self;
     }
@@ -158,6 +169,7 @@ public:
     template <typename Self>
     auto setAlignment(this Self&& self, Alignment a) -> auto& {
         self.alignment = a;
+        self.isDirty = true;
         return self;
     }
 
@@ -165,6 +177,7 @@ public:
     auto setOutline(this Self&& self, SDL_Color color, int thickness) -> auto& {
         self.outlineFill = color;
         self.outlineThickness = thickness;
+        self.isDirty = true;
         return self;
     }
 
@@ -191,6 +204,7 @@ public:
         self.font = font;
         self.fontSize = size;
         self.autoWarp = warp;
+        self.isDirty = true;
         return self;
     }
     void onRender(SDL_Renderer* renderer, float absX, float absY) override {
@@ -228,8 +242,8 @@ public:
         int totalH = 0;
         TTF_GetTextSize(textHandle, &totalW, &totalH);
 
-        float finalX = absX + offsetX;
-        float finalY = absY + offsetY;
+        float finalX = absX + offsetX.get(parent->cacheW);
+        float finalY = absY + offsetY.get(parent->cacheH);
 
         if (alignment >= Alignment::MiddleLeft && alignment <= Alignment::MiddleRight) {
             finalY += (cacheH - static_cast<float>(totalH)) * 0.5F;
@@ -264,7 +278,7 @@ public:
     }
 };
 class Box : public Element {
-public: // TODO:内阴影
+public: // TODO:内阴影 图片
     SDL_BlendMode blendMode = SDL_BLENDMODE_BLEND;
     SDL_Color backgroundFill{};
     SDL_Color borderFill{};
@@ -274,10 +288,12 @@ public: // TODO:内阴影
     float shadowOffsetY{};
     float borderThickness{};
     float radius{};
+    SDL_Texture* textrue;
 
     template <typename Self>
     auto setBgColor(this Self&& self, SDL_Color color) -> auto& {
         self.backgroundFill = color;
+        self.isDirty = true;
         return self;
     }
 
@@ -285,6 +301,7 @@ public: // TODO:内阴影
     auto setBorder(this Self&& self, SDL_Color color, float thickness) -> auto& {
         self.borderFill = color;
         self.borderThickness = thickness;
+        self.isDirty = true;
         return self;
     }
 
@@ -294,24 +311,27 @@ public: // TODO:内阴影
         self.shadowSize = size;
         self.shadowOffsetX = x;
         self.shadowOffsetY = y;
+        self.isDirty = true;
         return self;
     }
 
     template <typename Self>
     auto setRadius(this Self&& self, float r) -> auto& {
         self.radius = r;
+        self.isDirty = true;
         return self;
     }
 
     void onRender(SDL_Renderer* renderer, float absX, float absY) override {
-        float finalX = absX + offsetX;
-        float finalY = absY + offsetY;
+        float finalX = absX + offsetX.get(parent->cacheW);
+        float finalY = absY + offsetY.get(parent->cacheH);
         if (shadowSize > 0) {
             drawShadow(renderer, finalX + shadowOffsetX, finalY + shadowOffsetY, cacheW, cacheH,
                        radius, shadowSize, shadowFill);
         }
         std::vector<SDL_Vertex> verts;
-        roundedRect(absX + offsetX, absY + offsetY, cacheW, cacheH, radius, backgroundFill, &verts);
+        roundedRect(absX + offsetX.get(parent->cacheW), absY + offsetY.get(parent->cacheH), cacheW,
+                    cacheH, radius, backgroundFill, &verts);
 
         if (verts.size() < 3) {
             return;
@@ -333,10 +353,11 @@ public: // TODO:内阴影
     }
     void onRenderInteraction(SDL_Renderer* renderer, float absX, float absY,
                              SDL_Color idColor) override {
-        float finalX = absX + offsetX;
-        float finalY = absY + offsetY;
+        float finalX = absX + offsetX.get(parent->cacheW);
+        float finalY = absY + offsetY.get(parent->cacheH);
         std::vector<SDL_Vertex> verts;
-        roundedRect(absX + offsetX, absY + offsetY, cacheW, cacheH, radius, idColor, &verts);
+        roundedRect(absX + offsetX.get(parent->cacheW), absY + offsetY.get(parent->cacheH), cacheW,
+                    cacheH, radius, idColor, &verts);
         if (verts.size() < 3) {
             return;
         }
@@ -386,58 +407,85 @@ public:
         }
         auto* parent = root->parent; // 获取父元素
 
+        // 空白空间
+        float emptyAreaW = (parent->cacheW - parent->padding.left - parent->padding.right -
+                            (static_cast<float>(parent->colDims.size() - 1) * parent->colGap));
+        float emptyAreaH = (parent->cacheH - parent->padding.top - parent->padding.bottom -
+                            (static_cast<float>(parent->rowDims.size() - 1) * parent->rowGap));
+        float fixedPixelsW = 0.F;
+        float fixedPixelsH = 0.F;
         // 权重和
-        float kr = std::ranges::fold_left(parent->rowWeights, 0.F, std::plus<>());
-        float kc = std::ranges::fold_left(parent->colWeights, 0.F, std::plus<>());
+        // 列总权值
+        float kr = std::ranges::fold_left(parent->rowDims, 0.F,
+                                          [&fixedPixelsH](float sum, const Dimension& d) -> float {
+                                              if (d.unit == SizeUnit::Weight) {
+                                                  return sum + d.value;
+                                              }
+                                              fixedPixelsH += d.value;
+                                              return sum;
+                                          });
+
+        // 行总权值
+        float kc = std::ranges::fold_left(parent->colDims, 0.F,
+                                          [&fixedPixelsW](float sum, const Dimension& d) -> float {
+                                              if (d.unit == SizeUnit::Weight) {
+                                                  return sum + d.value;
+                                              }
+                                              fixedPixelsW += d.value;
+                                              return sum;
+                                          });
         // 处理权重为0的情况
         if (kr <= 0 || kc <= 0) {
             return;
         }
         // 计算横向单位长度
-        float weightUnit = (parent->cacheW - parent->padding.left - parent->padding.right -
-                            static_cast<float>(parent->colWeights.size() - 1) * parent->colGap) /
-                           kc;
+        float weightUnit = std::max((emptyAreaW - fixedPixelsW), 0.F) / kc;
         // 计算竖向单位长度
-        float heightUnit = (parent->cacheH - parent->padding.top - parent->padding.bottom -
-                            static_cast<float>(parent->rowWeights.size() - 1) * parent->rowGap) /
-                           kr;
+        float heightUnit = std::max((emptyAreaH - fixedPixelsH), 0.F) / kr;
         // 计算x位置
-        root->cacheX =
-            parent->padding.left + // 父亲的左内边距
-            (weightUnit * std::ranges::fold_left(
-                              parent->colWeights | std::ranges::views::take(root->gridPos.colStart),
-                              0.F, std::plus<>())) + // 计算前面元素的宽度
-            (static_cast<float>(root->gridPos.colStart) *
-             parent->colGap) + // 计算前面元素之间的缝隙宽度
-            root->margin.left; // 左外边距
+        root->cacheX = parent->padding.left + // 父亲的左内边距
+                       std::ranges::fold_left(
+                           parent->colDims | std::ranges::views::take(root->gridPos.colStart), 0.F,
+                           [weightUnit](float sum, const Dimension& d) -> float {
+                               return sum + d.get(weightUnit);
+                           }) + // 计算前面元素的宽度
+                       (static_cast<float>(root->gridPos.colStart) *
+                        parent->colGap) + // 计算前面元素之间的缝隙宽度
+                       root->margin.left; // 左外边距
 
         // 计算宽度
         root->cacheW =
-            (weightUnit *
-             std::ranges::fold_left(
-                 parent->colWeights | std::ranges::views::drop(root->gridPos.colStart) |
-                     std::ranges::views::take(root->gridPos.colEnd - root->gridPos.colStart),
-                 0.F, std::plus<>())) +
+            std::ranges::fold_left(
+                parent->colDims | std::ranges::views::drop(root->gridPos.colStart) |
+                    std::ranges::views::take(root->gridPos.colEnd - root->gridPos.colStart),
+                0.F,
+                [weightUnit](float sum, const Dimension& d) -> float {
+                    return sum + d.get(weightUnit);
+                }) +
             (static_cast<float>(std::max((root->gridPos.colEnd - root->gridPos.colStart - 1), 0)) *
              parent->colGap) -
             root->margin.left - root->margin.right;
 
         root->cacheY =
             parent->padding.top +
-            (heightUnit * std::ranges::fold_left(
-                              parent->rowWeights | std::ranges::views::take(root->gridPos.rowStart),
-                              0.F, std::plus<>())) +
-            (static_cast<float>(root->gridPos.rowStart) * parent->rowGap) + root->margin.top;
+            (std::ranges::fold_left(
+                 parent->rowDims | std::ranges::views::take(root->gridPos.rowStart), 0.F,
+                 [heightUnit](float sum, const Dimension& d) -> float {
+                     return sum + d.get(heightUnit);
+                 }) +
+             (static_cast<float>(root->gridPos.rowStart) * parent->rowGap) + root->margin.top);
 
         root->cacheH =
-            (heightUnit *
-             std::ranges::fold_left(
-                 parent->rowWeights | std::ranges::views::drop(root->gridPos.rowStart) |
-                     std::ranges::views::take(root->gridPos.rowEnd - root->gridPos.rowStart),
-                 0.F, std::plus<>())) +
-            (static_cast<float>(std::max((root->gridPos.rowEnd - root->gridPos.rowStart - 1), 0)) *
-             parent->rowGap) -
-            root->margin.top - root->margin.bottom;
+            std::ranges::fold_left(
+                parent->rowDims | std::ranges::views::drop(root->gridPos.rowStart) |
+                    std::ranges::views::take(root->gridPos.rowEnd - root->gridPos.rowStart),
+                0.F,
+                [heightUnit](float sum, const Dimension& d) -> float {
+                    return sum + d.get(heightUnit);
+                }) +
+            ((static_cast<float>(std::max((root->gridPos.rowEnd - root->gridPos.rowStart - 1), 0)) *
+              parent->rowGap) -
+             root->margin.top - root->margin.bottom);
 
         for (auto* child : root->children) {
             child->isDirty = true;
@@ -446,11 +494,18 @@ public:
         root->isDirty = false;
         root->cacheW = std::max(0.F, root->cacheW);
         root->cacheH = std::max(0.F, root->cacheH);
+        // std::cout << "ID: " << root->ID << " X: " << root->cacheX << " Y: " << root->cacheY
+        //           << " W: " << root->cacheW << " H: " << root->cacheH << " WU: " << weightUnit
+        //           << " HU: " << heightUnit << " KR: " << kr << " KC: " << kc
+        //           << " EAW: " << emptyAreaW << " EAH: " << emptyAreaH << std::endl
+        //           << std::endl;
     }
+
+private:
 };
 
 enum AnimationType { Liner };
-class Animation {
+class Animation { // TODO: 增加在开始的时候和在动画中的函数
 public:
     void* target;
     std::function<void(float f)> howToChange;
@@ -473,13 +528,17 @@ private:
     LayoutEngine layoutEngine{};
     UIRenderer uiRenderer{};
     TTF_TextEngine* textEngine; // TODO :增加文字
+    Element* root{};            // 根元素
+    SDL_Renderer* renderer;
+    bool isDirty = true;
+
 public:
     UI(SDL_Renderer* r) : renderer(r) {
 
         textEngine = TTF_CreateRendererTextEngine(renderer);
         rootParent = std::make_unique<Element>();
-        rootParent->rowWeights = {1.F};
-        rootParent->colWeights = {1.F};
+        rootParent->rowDims = {Dimension{.unit = SizeUnit::Weight, .value = 1.F}};
+        rootParent->colDims = {Dimension{.unit = SizeUnit::Weight, .value = 1.F}};
         rootParent->padding = {.top = 0.F, .bottom = 0.F, .left = 0.F, .right = 0.F};
     }
     ~UI() {
@@ -488,9 +547,6 @@ public:
             textEngine = nullptr;
         }
     }
-    Element* root{}; // 根元素
-    SDL_Renderer* renderer;
-    bool isDirty = true;
     [[nodiscard]] auto getTextEngine() const { return textEngine; }
     void handleInteractions(int mouseX, int mouseY, std::array<bool, 6> states) {
         static uint32_t lastHoveredElementID = -1;
@@ -583,7 +639,7 @@ public:
             root->isDirty = true;
             calculate();
         }
-
+        //        std::cout << root->cacheW << " " << root->cacheH << std::endl;
         uiRenderer.renderUI(renderer, root, 0, 0);
     }
     void renderInteractionTexture(int windowW, int windowH) {
